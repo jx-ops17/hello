@@ -255,14 +255,14 @@ function update() {
     if (keys["w"] && player.y > 0) player.y -= 8;
     if (keys["s"] && player.y < canvas.height - PADDLE_H) player.y += 8;
 
-    // --- AI Movement (Lerp for smoothness) ---
-    // AI aims for the ball, but with a slight delay
+    // --- AI Movement (HARDER DIFFICULTY) ---
+    // AI aims for the ball with better prediction
     let targetY = ball.y - PADDLE_H / 2;
-    // Simple difficulty ramp: random error based on ball speed
-    let error = (Math.random() - 0.5) * 30; 
+    // Reduced error for harder difficulty (was 30, now 10)
+    let error = (Math.random() - 0.5) * 10; 
     
-    // Lerp: Move 10% of the way to the target per frame
-    ai.y += (targetY + error - ai.y) * 0.09;
+    // Lerp: Move 20% of the way to the target per frame (was 9%, now 20% - much faster!)
+    ai.y += (targetY + error - ai.y) * 0.20;
     
     // Clamp AI
     if(ai.y < 0) ai.y = 0;
