@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title> PONG: ARCADE EDITION</title>
+<title>NEON PONG: MULTIPLAYER EDITION</title>
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
 
@@ -92,7 +92,7 @@
         text-shadow: 2px 2px #ff00de;
     }
     
-    select {
+    input, select {
         font-family: 'Press Start 2P', cursive;
         font-size: 12px;
         padding: 10px 20px;
@@ -100,14 +100,23 @@
         color: #0ff;
         border: 2px solid #0ff;
         border-radius: 4px;
-        cursor: pointer;
         text-shadow: 0 0 5px #0ff;
         box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+        text-align: center;
     }
     
-    select:hover {
+    input {
+        cursor: text;
+    }
+    
+    select {
+        cursor: pointer;
+    }
+    
+    input:focus, select:hover {
         background-color: #2a2a2a;
         box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+        outline: none;
     }
     
     select option {
@@ -119,7 +128,7 @@
         font-family: 'Press Start 2P', cursive;
         font-size: 14px;
         padding: 15px 30px;
-        margin-top: 30px;
+        margin-top: 20px;
         background-color: #1a1a1a;
         color: #ff0;
         border: 3px solid #ff0;
@@ -135,6 +144,19 @@
         color: #000;
         transform: scale(1.05);
         box-shadow: 0 0 30px rgba(255, 255, 0, 0.8);
+    }
+    
+    button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
+    }
+    
+    .status {
+        font-size: 10px;
+        color: #ff0;
+        margin-top: 15px;
+        min-height: 20px;
     }
     
     .blink { 
@@ -153,18 +175,13 @@
     <div class="scanlines"></div>
     
     <div id="ui-layer">
-        
+        <h1>NEON PONG</h1>
         <div id="menu-screen">
-            <p style="margin-bottom: 20px;">W / S to Move • First to 10 Wins</p>
+            <p style="margin-bottom: 20px;">Multiplayer Edition</p>
             
             <div class="menu-section">
-                <label>DIFFICULTY:</label>
-                <select id="difficulty">
-                    <option value="easy">EASY</option>
-                    <option value="medium" selected>MEDIUM</option>
-                    <option value="hard">HARD</option>
-                    <option value="impossible">IMPOSSIBLE</option>
-                </select>
+                <label>ROOM KEY:</label>
+                <input type="text" id="room-key" placeholder="Enter 4-digit code" maxlength="10">
             </div>
             
             <div class="menu-section">
@@ -193,7 +210,8 @@
                 </select>
             </div>
             
-            <button id="start-btn" class="blink">START GAME</button>
+            <button id="join-btn">JOIN ROOM</button>
+            <div class="status" id="status">Enter a room key to play with a friend</div>
         </div>
         
         <div id="gameover-screen" class="hidden"></div>
@@ -202,35 +220,38 @@
 
 <script>
 /**
- * 1. SETUP & CONFIGURATION
+ * MULTIPLAYER NEON PONG
+ * Uses persistent storage to sync game state between two players
  */
+
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const uiLayer = document.getElementById("ui-layer");
 const menuScreen = document.getElementById("menu-screen");
 const gameoverScreen = document.getElementById("gameover-screen");
-const startBtn = document.getElementById("start-btn");
+const joinBtn = document.getElementById("join-btn");
+const statusEl = document.getElementById("status");
 
 const PADDLE_H = 80;
 const PADDLE_W = 15;
 const WIN_SCORE = 10;
+const SYNC_INTERVAL = 50; // Sync every 50ms
 
-// Colors (will be set from menu)
+// Colors
 let COLOR_PLAYER = "#0ff";
-let COLOR_AI = "#ff00de";
+let COLOR_OPPONENT = "#ff00de";
 let COLOR_BALL = "#fff";
 
-// Difficulty settings
-let aiSpeed = 0.12;  // Default medium
-let aiError = 20;    // Default medium
-
-// Game State
-let gameState = "MENU"; // MENU, PLAYING, GAMEOVER
-let winnerText = "";
+// Multiplayer state
+let roomKey = "";
+let playerId = "";
+let playerSide = null; // "left" or "right"
+let gameState = "MENU";
 let shakeIntensity = 0;
+let lastSync = 0;
 
 /**
- * 2. AUDIO ENGINE (Web Audio API)
+ * AUDIO ENGINE
  */
 const AudioContext = window.AudioContext || window.webkitAudioContext;
 let audioCtx;
@@ -277,10 +298,8 @@ function playSound(type) {
 }
 
 /**
- * 3. GAME OBJECTS
+ * PARTICLES
  */
-
-// Particles for explosions
 let particles = [];
 class Particle {
     constructor(x, y, color) {
@@ -306,11 +325,10 @@ class Particle {
     }
 }
 
-// Ball Trail
 let trail = [];
 
-let player = { x: 20, y: 200, score: 0, color: COLOR_PLAYER };
-let ai = { x: canvas.width - 35, y: 200, score: 0, color: COLOR_AI };
+let leftPaddle = { x: 20, y: 200, score: 0, color: COLOR_PLAYER };
+let rightPaddle = { x: canvas.width - 35, y: 200, score: 0, color: COLOR_OPPONENT };
 let ball = { x: 450, y: 250, dx: 5, dy: 3, r: 8, speed: 7 };
 
 const keys = {};
@@ -318,55 +336,175 @@ document.addEventListener("keydown", e => keys[e.key] = true);
 document.addEventListener("keyup", e => keys[e.key] = false);
 
 /**
- * 4. MENU LOGIC
+ * MULTIPLAYER FUNCTIONS
  */
-startBtn.addEventListener("click", () => {
-    initAudio();
-    
-    // Get difficulty settings
-    const difficulty = document.getElementById("difficulty").value;
-    switch(difficulty) {
-        case "easy":
-            aiSpeed = 0.08;
-            aiError = 35;
-            break;
-        case "medium":
-            aiSpeed = 0.12;
-            aiError = 20;
-            break;
-        case "hard":
-            aiSpeed = 0.20;
-            aiError = 10;
-            break;
-        case "impossible":
-            aiSpeed = 0.30;
-            aiError = 3;
-            break;
+
+function generatePlayerId() {
+    return 'player_' + Math.random().toString(36).substr(2, 9);
+}
+
+async function joinRoom() {
+    const roomInput = document.getElementById("room-key").value.trim();
+    if (!roomInput) {
+        statusEl.textContent = "Please enter a room key";
+        return;
     }
     
-    // Get color settings
-    COLOR_PLAYER = document.getElementById("paddle-color").value;
-    COLOR_BALL = document.getElementById("ball-color").value;
+    roomKey = roomInput;
+    playerId = generatePlayerId();
     
-    // Update player color
-    player.color = COLOR_PLAYER;
+    initAudio();
+    statusEl.textContent = "Joining room...";
+    joinBtn.disabled = true;
     
-    // Start game
-    resetGame();
+    try {
+        // Check if room exists
+        const roomData = await window.storage.get(`room:${roomKey}`, true);
+        
+        if (!roomData) {
+            // Create new room - you're player 1 (left side)
+            playerSide = "left";
+            COLOR_PLAYER = document.getElementById("paddle-color").value;
+            COLOR_BALL = document.getElementById("ball-color").value;
+            
+            await window.storage.set(`room:${roomKey}`, JSON.stringify({
+                player1: playerId,
+                player2: null,
+                player1Color: COLOR_PLAYER,
+                ballColor: COLOR_BALL,
+                created: Date.now()
+            }), true);
+            
+            statusEl.textContent = "Waiting for opponent...";
+            waitForOpponent();
+        } else {
+            // Join existing room - you're player 2 (right side)
+            const room = JSON.parse(roomData.value);
+            
+            if (room.player2) {
+                statusEl.textContent = "Room is full!";
+                joinBtn.disabled = false;
+                return;
+            }
+            
+            playerSide = "right";
+            COLOR_PLAYER = document.getElementById("paddle-color").value;
+            COLOR_OPPONENT = room.player1Color;
+            COLOR_BALL = room.ballColor;
+            
+            room.player2 = playerId;
+            room.player2Color = COLOR_PLAYER;
+            
+            await window.storage.set(`room:${roomKey}`, JSON.stringify(room), true);
+            
+            // Initialize game state
+            await initGameState();
+            startGame();
+        }
+    } catch (error) {
+        console.error("Error joining room:", error);
+        statusEl.textContent = "Error joining room. Try again.";
+        joinBtn.disabled = false;
+    }
+}
+
+async function waitForOpponent() {
+    const checkInterval = setInterval(async () => {
+        try {
+            const roomData = await window.storage.get(`room:${roomKey}`, true);
+            if (roomData) {
+                const room = JSON.parse(roomData.value);
+                if (room.player2) {
+                    clearInterval(checkInterval);
+                    COLOR_OPPONENT = room.player2Color;
+                    await initGameState();
+                    startGame();
+                }
+            }
+        } catch (error) {
+            console.error("Error checking for opponent:", error);
+        }
+    }, 500);
+}
+
+async function initGameState() {
+    const gameData = {
+        ball: { x: 450, y: 250, dx: 5, dy: 3, speed: 7 },
+        leftPaddle: { y: 200, score: 0 },
+        rightPaddle: { y: 200, score: 0 },
+        gameActive: true,
+        lastUpdate: Date.now()
+    };
+    
+    await window.storage.set(`game:${roomKey}`, JSON.stringify(gameData), true);
+}
+
+function startGame() {
     gameState = "PLAYING";
     menuScreen.classList.add("hidden");
-});
+    syncGame();
+}
 
-// Touch controls
-canvas.addEventListener("touchmove", e => {
-    e.preventDefault();
-    let rect = canvas.getBoundingClientRect();
-    let y = e.touches[0].clientY - rect.top;
-    player.y = y - PADDLE_H / 2;
-}, { passive: false });
+async function syncGame() {
+    if (gameState !== "PLAYING") return;
+    
+    const now = Date.now();
+    if (now - lastSync < SYNC_INTERVAL) return;
+    lastSync = now;
+    
+    try {
+        // Get current game state
+        const gameData = await window.storage.get(`game:${roomKey}`, true);
+        if (!gameData) return;
+        
+        const state = JSON.parse(gameData.value);
+        
+        // Update my paddle position
+        if (playerSide === "left") {
+            state.leftPaddle.y = leftPaddle.y;
+        } else {
+            state.rightPaddle.y = rightPaddle.y;
+        }
+        
+        // Only the left player (host) updates ball physics
+        if (playerSide === "left") {
+            state.ball = {
+                x: ball.x,
+                y: ball.y,
+                dx: ball.dx,
+                dy: ball.dy,
+                speed: ball.speed
+            };
+            state.leftPaddle.score = leftPaddle.score;
+            state.rightPaddle.score = rightPaddle.score;
+        } else {
+            // Right player reads ball state from host
+            ball.x = state.ball.x;
+            ball.y = state.ball.y;
+            ball.dx = state.ball.dx;
+            ball.dy = state.ball.dy;
+            ball.speed = state.ball.speed;
+            leftPaddle.score = state.leftPaddle.score;
+            rightPaddle.score = state.rightPaddle.score;
+        }
+        
+        // Both players read opponent paddle position
+        if (playerSide === "left") {
+            rightPaddle.y = state.rightPaddle.y;
+        } else {
+            leftPaddle.y = state.leftPaddle.y;
+        }
+        
+        state.lastUpdate = now;
+        await window.storage.set(`game:${roomKey}`, JSON.stringify(state), true);
+        
+    } catch (error) {
+        console.error("Sync error:", error);
+    }
+}
 
 /**
- * 5. GAME LOGIC
+ * GAME LOGIC
  */
 
 function spawnParticles(x, y, color) {
@@ -384,106 +522,101 @@ function resetBall() {
     trail = [];
 }
 
-function resetGame() {
-    player.score = 0;
-    ai.score = 0;
-    resetBall();
-}
-
 function update() {
     if (gameState !== "PLAYING") return;
-
-    // Player Movement
-    if (keys["w"] && player.y > 0) player.y -= 8;
-    if (keys["s"] && player.y < canvas.height - PADDLE_H) player.y += 8;
-
-    // AI Movement (uses difficulty settings)
-    let targetY = ball.y - PADDLE_H / 2;
-    let error = (Math.random() - 0.5) * aiError;
-    ai.y += (targetY + error - ai.y) * aiSpeed;
     
-    // Clamp AI
-    if(ai.y < 0) ai.y = 0;
-    if(ai.y > canvas.height - PADDLE_H) ai.y = canvas.height - PADDLE_H;
+    // Sync with server
+    syncGame();
 
-    // Ball Physics
-    ball.x += ball.dx;
-    ball.y += ball.dy;
+    // Control your paddle
+    const myPaddle = playerSide === "left" ? leftPaddle : rightPaddle;
+    
+    if (keys["w"] && myPaddle.y > 0) myPaddle.y -= 8;
+    if (keys["s"] && myPaddle.y < canvas.height - PADDLE_H) myPaddle.y += 8;
+    
+    // Only the host (left player) runs ball physics
+    if (playerSide === "left") {
+        // Ball Physics
+        ball.x += ball.dx;
+        ball.y += ball.dy;
 
-    // Trail logic
-    trail.push({x: ball.x, y: ball.y});
-    if(trail.length > 20) trail.shift();
+        // Trail logic
+        trail.push({x: ball.x, y: ball.y});
+        if(trail.length > 20) trail.shift();
 
-    // Wall Collisions
-    if (ball.y - ball.r <= 0 || ball.y + ball.r >= canvas.height) {
-        ball.dy *= -1;
-        playSound("wall");
-        shakeIntensity = 5;
+        // Wall Collisions
+        if (ball.y - ball.r <= 0 || ball.y + ball.r >= canvas.height) {
+            ball.dy *= -1;
+            playSound("wall");
+            shakeIntensity = 5;
+        }
+
+        // Paddle Collisions
+        function checkCollision(paddle) {
+            return ball.x - ball.r < paddle.x + PADDLE_W &&
+                   ball.x + ball.r > paddle.x &&
+                   ball.y > paddle.y &&
+                   ball.y < paddle.y + PADDLE_H;
+        }
+
+        // Left Paddle Hit
+        if (checkCollision(leftPaddle)) {
+            let collidePoint = (ball.y - (leftPaddle.y + PADDLE_H / 2));
+            collidePoint = collidePoint / (PADDLE_H / 2);
+            
+            ball.speed = Math.min(ball.speed * 1.05, 18); 
+            
+            let angleRad = (Math.PI / 4) * collidePoint;
+            
+            ball.dx = ball.speed * Math.cos(angleRad);
+            ball.dy = ball.speed * Math.sin(angleRad);
+            
+            ball.x = leftPaddle.x + PADDLE_W + ball.r + 1;
+
+            playSound("hit");
+            spawnParticles(ball.x, ball.y, leftPaddle.color);
+            shakeIntensity = 10;
+        }
+
+        // Right Paddle Hit
+        if (checkCollision(rightPaddle)) {
+            let collidePoint = (ball.y - (rightPaddle.y + PADDLE_H / 2));
+            collidePoint = collidePoint / (PADDLE_H / 2);
+            
+            ball.speed = Math.min(ball.speed * 1.05, 18);
+
+            let angleRad = (Math.PI / 4) * collidePoint;
+            
+            ball.dx = -ball.speed * Math.cos(angleRad);
+            ball.dy = ball.speed * Math.sin(angleRad);
+
+            ball.x = rightPaddle.x - ball.r - 1;
+
+            playSound("hit");
+            spawnParticles(ball.x, ball.y, rightPaddle.color);
+            shakeIntensity = 10;
+        }
+
+        // Scoring
+        if (ball.x < 0) {
+            rightPaddle.score++;
+            checkWin();
+            playSound("score");
+            resetBall();
+        }
+        if (ball.x > canvas.width) {
+            leftPaddle.score++;
+            checkWin();
+            playSound("score");
+            resetBall();
+        }
+    } else {
+        // Right player: update trail based on received ball position
+        trail.push({x: ball.x, y: ball.y});
+        if(trail.length > 20) trail.shift();
     }
 
-    // Paddle Collisions
-    function checkCollision(paddle) {
-        return ball.x - ball.r < paddle.x + PADDLE_W &&
-               ball.x + ball.r > paddle.x &&
-               ball.y > paddle.y &&
-               ball.y < paddle.y + PADDLE_H;
-    }
-
-    // Player Hit
-    if (checkCollision(player)) {
-        let collidePoint = (ball.y - (player.y + PADDLE_H / 2));
-        collidePoint = collidePoint / (PADDLE_H / 2);
-        
-        ball.speed = Math.min(ball.speed * 1.05, 18); 
-        
-        let angleRad = (Math.PI / 4) * collidePoint;
-        let direction = (ball.x < canvas.width / 2) ? 1 : -1;
-        
-        ball.dx = direction * ball.speed * Math.cos(angleRad);
-        ball.dy = ball.speed * Math.sin(angleRad);
-        
-        ball.x = player.x + PADDLE_W + ball.r + 1;
-
-        playSound("hit");
-        spawnParticles(ball.x, ball.y, COLOR_PLAYER);
-        shakeIntensity = 10;
-    }
-
-    // AI Hit
-    if (checkCollision(ai)) {
-        let collidePoint = (ball.y - (ai.y + PADDLE_H / 2));
-        collidePoint = collidePoint / (PADDLE_H / 2);
-        
-        ball.speed = Math.min(ball.speed * 1.05, 18);
-
-        let angleRad = (Math.PI / 4) * collidePoint;
-        let direction = (ball.x < canvas.width / 2) ? 1 : -1;
-        
-        ball.dx = direction * ball.speed * Math.cos(angleRad);
-        ball.dy = ball.speed * Math.sin(angleRad);
-
-        ball.x = ai.x - ball.r - 1;
-
-        playSound("hit");
-        spawnParticles(ball.x, ball.y, COLOR_AI);
-        shakeIntensity = 10;
-    }
-
-    // Scoring
-    if (ball.x < 0) {
-        ai.score++;
-        checkWin();
-        playSound("score");
-        resetBall();
-    }
-    if (ball.x > canvas.width) {
-        player.score++;
-        checkWin();
-        playSound("score");
-        resetBall();
-    }
-
-    // Particles & Shake Update
+    // Particles & Shake Update (both players)
     particles.forEach((p, index) => {
         p.update();
         if (p.life <= 0) particles.splice(index, 1);
@@ -494,29 +627,30 @@ function update() {
 }
 
 function checkWin() {
-    if (player.score >= WIN_SCORE || ai.score >= WIN_SCORE) {
+    if (leftPaddle.score >= WIN_SCORE || rightPaddle.score >= WIN_SCORE) {
         gameState = "GAMEOVER";
-        winnerText = player.score >= WIN_SCORE ? "YOU WIN" : "GAME OVER";
+        
+        const youWon = (playerSide === "left" && leftPaddle.score >= WIN_SCORE) || 
+                       (playerSide === "right" && rightPaddle.score >= WIN_SCORE);
+        
+        const winnerText = youWon ? "YOU WIN" : "YOU LOSE";
         
         gameoverScreen.innerHTML = `
-            <h1 style="color:${player.score >= WIN_SCORE ? '#0f0' : '#f00'}; text-shadow: 4px 4px ${player.score >= WIN_SCORE ? '#0a0' : '#a00'}">${winnerText}</h1>
-            <p style="font-size: 16px; margin: 20px 0;">Score: ${player.score} - ${ai.score}</p>
-            <button id="play-again-btn" class="blink">PLAY AGAIN</button>
+            <h1 style="color:${youWon ? '#0f0' : '#f00'}; text-shadow: 4px 4px ${youWon ? '#0a0' : '#a00'}">${winnerText}</h1>
+            <p style="font-size: 16px; margin: 20px 0;">Score: ${leftPaddle.score} - ${rightPaddle.score}</p>
+            <button id="menu-btn">BACK TO MENU</button>
         `;
         
         gameoverScreen.classList.remove("hidden");
         
-        // Add event listener to play again button
-        document.getElementById("play-again-btn").addEventListener("click", () => {
-            gameoverScreen.classList.add("hidden");
-            menuScreen.classList.remove("hidden");
-            gameState = "MENU";
+        document.getElementById("menu-btn").addEventListener("click", () => {
+            location.reload();
         });
     }
 }
 
 /**
- * 6. RENDERING
+ * RENDERING
  */
 
 function drawNet() {
@@ -533,7 +667,6 @@ function drawNet() {
 function draw() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Apply Screen Shake
     ctx.save();
     if (shakeIntensity > 0) {
         let dx = (Math.random() - 0.5) * shakeIntensity;
@@ -549,8 +682,6 @@ function draw() {
         let ratio = (i + 1) / trail.length;
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, ball.r * ratio, 0, Math.PI * 2);
-        ctx.fillStyle = COLOR_BALL.replace('#', 'rgba(') + ratio * 0.5 + ')';
-        // Convert hex to rgba for trail opacity
         let r = parseInt(COLOR_BALL.slice(1,3), 16);
         let g = parseInt(COLOR_BALL.slice(3,5), 16);
         let b = parseInt(COLOR_BALL.slice(5,7), 16);
@@ -558,19 +689,27 @@ function draw() {
         ctx.fill();
     }
 
-    // Draw Particles
     particles.forEach(p => p.draw());
 
-    // Draw Player
-    ctx.shadowBlur = 20;
-    ctx.shadowColor = COLOR_PLAYER;
-    ctx.fillStyle = COLOR_PLAYER;
-    ctx.fillRect(player.x, player.y, PADDLE_W, PADDLE_H);
+    // Set colors based on player side
+    if (playerSide === "left") {
+        leftPaddle.color = COLOR_PLAYER;
+        rightPaddle.color = COLOR_OPPONENT;
+    } else {
+        leftPaddle.color = COLOR_OPPONENT;
+        rightPaddle.color = COLOR_PLAYER;
+    }
 
-    // Draw AI
-    ctx.shadowColor = COLOR_AI;
-    ctx.fillStyle = COLOR_AI;
-    ctx.fillRect(ai.x, ai.y, PADDLE_W, PADDLE_H);
+    // Draw Left Paddle
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = leftPaddle.color;
+    ctx.fillStyle = leftPaddle.color;
+    ctx.fillRect(leftPaddle.x, leftPaddle.y, PADDLE_W, PADDLE_H);
+
+    // Draw Right Paddle
+    ctx.shadowColor = rightPaddle.color;
+    ctx.fillStyle = rightPaddle.color;
+    ctx.fillRect(rightPaddle.x, rightPaddle.y, PADDLE_W, PADDLE_H);
 
     // Draw Ball
     ctx.shadowBlur = 15;
@@ -580,7 +719,6 @@ function draw() {
     ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
     ctx.fill();
 
-    // Reset Shadows for Score
     ctx.shadowBlur = 0;
     ctx.restore();
 
@@ -588,8 +726,8 @@ function draw() {
     ctx.font = "60px 'Press Start 2P'";
     ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
     ctx.textAlign = "center";
-    ctx.fillText(player.score, canvas.width / 4, canvas.height / 2 + 20);
-    ctx.fillText(ai.score, canvas.width * 0.75, canvas.height / 2 + 20);
+    ctx.fillText(leftPaddle.score, canvas.width / 4, canvas.height / 2 + 20);
+    ctx.fillText(rightPaddle.score, canvas.width * 0.75, canvas.height / 2 + 20);
 }
 
 function loop() {
@@ -597,6 +735,22 @@ function loop() {
     draw();
     requestAnimationFrame(loop);
 }
+
+// Event Listeners
+joinBtn.addEventListener("click", joinRoom);
+
+document.getElementById("room-key").addEventListener("keypress", (e) => {
+    if (e.key === "Enter") joinRoom();
+});
+
+// Touch controls
+canvas.addEventListener("touchmove", e => {
+    e.preventDefault();
+    const myPaddle = playerSide === "left" ? leftPaddle : rightPaddle;
+    let rect = canvas.getBoundingClientRect();
+    let y = e.touches[0].clientY - rect.top;
+    myPaddle.y = y - PADDLE_H / 2;
+}, { passive: false });
 
 loop();
 
