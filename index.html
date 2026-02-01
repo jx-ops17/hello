@@ -103,6 +103,7 @@
         text-shadow: 0 0 5px #0ff;
         box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
         text-align: center;
+        width: 250px;
     }
     
     input {
@@ -128,7 +129,7 @@
         font-family: 'Press Start 2P', cursive;
         font-size: 14px;
         padding: 15px 30px;
-        margin-top: 20px;
+        margin: 10px;
         background-color: #1a1a1a;
         color: #ff0;
         border: 3px solid #ff0;
@@ -139,7 +140,7 @@
         transition: all 0.3s;
     }
     
-    button:hover {
+    button:hover:not(:disabled) {
         background-color: #ff0;
         color: #000;
         transform: scale(1.05);
@@ -149,7 +150,6 @@
     button:disabled {
         opacity: 0.5;
         cursor: not-allowed;
-        transform: none;
     }
     
     .status {
@@ -159,12 +159,30 @@
         min-height: 20px;
     }
     
+    .room-code {
+        font-size: 24px;
+        color: #0f0;
+        margin: 20px 0;
+        padding: 15px 30px;
+        background-color: rgba(0, 255, 0, 0.1);
+        border: 2px solid #0f0;
+        border-radius: 8px;
+        text-shadow: 0 0 10px #0f0;
+        letter-spacing: 5px;
+    }
+    
     .blink { 
         animation: blinker 1s linear infinite; 
     }
 
     @keyframes blinker { 
         50% { opacity: 0; } 
+    }
+
+    .button-group {
+        display: flex;
+        gap: 10px;
+        margin-top: 20px;
     }
 </style>
 </head>
@@ -177,15 +195,10 @@
     <div id="ui-layer">
         <h1>NEON PONG</h1>
         <div id="menu-screen">
-            <p style="margin-bottom: 20px;">Multiplayer Edition</p>
+            <p style="margin-bottom: 20px;">Multiplayer Edition • First to 10 Wins</p>
             
             <div class="menu-section">
-                <label>ROOM KEY:</label>
-                <input type="text" id="room-key" placeholder="Enter 4-digit code" maxlength="10">
-            </div>
-            
-            <div class="menu-section">
-                <label>YOUR PADDLE:</label>
+                <label>YOUR PADDLE COLOR:</label>
                 <select id="paddle-color">
                     <option value="#0ff" selected>CYAN</option>
                     <option value="#0f0">GREEN</option>
@@ -210,18 +223,37 @@
                 </select>
             </div>
             
-            <button id="join-btn">JOIN ROOM</button>
-            <div class="status" id="status">Enter a room key to play with a friend</div>
+            <div class="button-group">
+                <button id="create-btn">CREATE ROOM</button>
+                <button id="show-join-btn">JOIN ROOM</button>
+            </div>
+            
+            <div id="join-section" class="hidden">
+                <div class="menu-section">
+                    <label>ENTER ROOM CODE:</label>
+                    <input type="text" id="room-code-input" placeholder="Enter 6-digit code" maxlength="6">
+                </div>
+                <button id="join-btn">CONNECT</button>
+            </div>
+            
+            <div id="waiting-section" class="hidden">
+                <p>Your Room Code:</p>
+                <div class="room-code" id="room-code-display"></div>
+                <p class="blink">Waiting for opponent to join...</p>
+            </div>
+            
+            <div class="status" id="status"></div>
         </div>
         
         <div id="gameover-screen" class="hidden"></div>
     </div>
 </div>
 
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <script>
 /**
  * MULTIPLAYER NEON PONG
- * Uses persistent storage to sync game state between two players
+ * Uses PeerJS for peer-to-peer connection
  */
 
 const canvas = document.getElementById("game");
@@ -229,13 +261,18 @@ const ctx = canvas.getContext("2d");
 const uiLayer = document.getElementById("ui-layer");
 const menuScreen = document.getElementById("menu-screen");
 const gameoverScreen = document.getElementById("gameover-screen");
+const createBtn = document.getElementById("create-btn");
+const showJoinBtn = document.getElementById("show-join-btn");
 const joinBtn = document.getElementById("join-btn");
+const joinSection = document.getElementById("join-section");
+const waitingSection = document.getElementById("waiting-section");
+const roomCodeDisplay = document.getElementById("room-code-display");
+const roomCodeInput = document.getElementById("room-code-input");
 const statusEl = document.getElementById("status");
 
 const PADDLE_H = 80;
 const PADDLE_W = 15;
 const WIN_SCORE = 10;
-const SYNC_INTERVAL = 50; // Sync every 50ms
 
 // Colors
 let COLOR_PLAYER = "#0ff";
@@ -243,12 +280,13 @@ let COLOR_OPPONENT = "#ff00de";
 let COLOR_BALL = "#fff";
 
 // Multiplayer state
-let roomKey = "";
-let playerId = "";
-let playerSide = null; // "left" or "right"
+let peer = null;
+let connection = null;
+let roomCode = "";
+let playerSide = null;
 let gameState = "MENU";
 let shakeIntensity = 0;
-let lastSync = 0;
+let isHost = false;
 
 /**
  * AUDIO ENGINE
@@ -339,168 +377,123 @@ document.addEventListener("keyup", e => keys[e.key] = false);
  * MULTIPLAYER FUNCTIONS
  */
 
-function generatePlayerId() {
-    return 'player_' + Math.random().toString(36).substr(2, 9);
+function generateRoomCode() {
+    return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-async function joinRoom() {
-    const roomInput = document.getElementById("room-key").value.trim();
-    if (!roomInput) {
-        statusEl.textContent = "Please enter a room key";
+function createRoom() {
+    initAudio();
+    COLOR_PLAYER = document.getElementById("paddle-color").value;
+    COLOR_BALL = document.getElementById("ball-color").value;
+    
+    roomCode = generateRoomCode();
+    playerSide = "left";
+    isHost = true;
+    
+    // Initialize PeerJS
+    peer = new Peer(roomCode);
+    
+    peer.on('open', (id) => {
+        roomCodeDisplay.textContent = roomCode;
+        waitingSection.classList.remove("hidden");
+        createBtn.disabled = true;
+        showJoinBtn.disabled = true;
+        statusEl.textContent = "Room created! Share the code with your friend.";
+    });
+    
+    peer.on('connection', (conn) => {
+        connection = conn;
+        
+        connection.on('open', () => {
+            // Send initial game setup to joining player
+            connection.send({
+                type: 'setup',
+                ballColor: COLOR_BALL,
+                hostColor: COLOR_PLAYER
+            });
+            
+            statusEl.textContent = "Opponent connected! Starting game...";
+            setTimeout(startGame, 2000);
+        });
+        
+        connection.on('data', (data) => {
+            if (data.type === 'paddle') {
+                rightPaddle.y = data.y;
+            }
+        });
+    });
+    
+    peer.on('error', (err) => {
+        console.error('PeerJS error:', err);
+        statusEl.textContent = "Connection error. Please try again.";
+    });
+}
+
+function joinRoom() {
+    const code = roomCodeInput.value.trim();
+    if (!code || code.length !== 6) {
+        statusEl.textContent = "Please enter a valid 6-digit room code";
         return;
     }
     
-    roomKey = roomInput;
-    playerId = generatePlayerId();
-    
     initAudio();
-    statusEl.textContent = "Joining room...";
-    joinBtn.disabled = true;
+    COLOR_PLAYER = document.getElementById("paddle-color").value;
     
-    try {
-        // Check if room exists
-        const roomData = await window.storage.get(`room:${roomKey}`, true);
+    playerSide = "right";
+    isHost = false;
+    
+    // Initialize PeerJS with random ID
+    peer = new Peer();
+    
+    peer.on('open', () => {
+        statusEl.textContent = "Connecting to room...";
+        connection = peer.connect(code);
         
-        if (!roomData) {
-            // Create new room - you're player 1 (left side)
-            playerSide = "left";
-            COLOR_PLAYER = document.getElementById("paddle-color").value;
-            COLOR_BALL = document.getElementById("ball-color").value;
+        connection.on('open', () => {
+            statusEl.textContent = "Connected! Waiting for game to start...";
             
-            await window.storage.set(`room:${roomKey}`, JSON.stringify({
-                player1: playerId,
-                player2: null,
-                player1Color: COLOR_PLAYER,
-                ballColor: COLOR_BALL,
-                created: Date.now()
-            }), true);
-            
-            statusEl.textContent = "Waiting for opponent...";
-            waitForOpponent();
-        } else {
-            // Join existing room - you're player 2 (right side)
-            const room = JSON.parse(roomData.value);
-            
-            if (room.player2) {
-                statusEl.textContent = "Room is full!";
-                joinBtn.disabled = false;
-                return;
-            }
-            
-            playerSide = "right";
-            COLOR_PLAYER = document.getElementById("paddle-color").value;
-            COLOR_OPPONENT = room.player1Color;
-            COLOR_BALL = room.ballColor;
-            
-            room.player2 = playerId;
-            room.player2Color = COLOR_PLAYER;
-            
-            await window.storage.set(`room:${roomKey}`, JSON.stringify(room), true);
-            
-            // Initialize game state
-            await initGameState();
-            startGame();
-        }
-    } catch (error) {
-        console.error("Error joining room:", error);
-        statusEl.textContent = "Error joining room. Try again.";
-        joinBtn.disabled = false;
-    }
-}
-
-async function waitForOpponent() {
-    const checkInterval = setInterval(async () => {
-        try {
-            const roomData = await window.storage.get(`room:${roomKey}`, true);
-            if (roomData) {
-                const room = JSON.parse(roomData.value);
-                if (room.player2) {
-                    clearInterval(checkInterval);
-                    COLOR_OPPONENT = room.player2Color;
-                    await initGameState();
-                    startGame();
+            connection.on('data', (data) => {
+                if (data.type === 'setup') {
+                    COLOR_BALL = data.ballColor;
+                    COLOR_OPPONENT = data.hostColor;
+                    setTimeout(startGame, 2000);
+                } else if (data.type === 'paddle') {
+                    leftPaddle.y = data.y;
+                } else if (data.type === 'ball') {
+                    ball.x = data.x;
+                    ball.y = data.y;
+                    ball.dx = data.dx;
+                    ball.dy = data.dy;
+                    ball.speed = data.speed;
+                } else if (data.type === 'score') {
+                    leftPaddle.score = data.leftScore;
+                    rightPaddle.score = data.rightScore;
                 }
-            }
-        } catch (error) {
-            console.error("Error checking for opponent:", error);
-        }
-    }, 500);
-}
-
-async function initGameState() {
-    const gameData = {
-        ball: { x: 450, y: 250, dx: 5, dy: 3, speed: 7 },
-        leftPaddle: { y: 200, score: 0 },
-        rightPaddle: { y: 200, score: 0 },
-        gameActive: true,
-        lastUpdate: Date.now()
-    };
-    
-    await window.storage.set(`game:${roomKey}`, JSON.stringify(gameData), true);
+            });
+        });
+        
+        connection.on('error', (err) => {
+            console.error('Connection error:', err);
+            statusEl.textContent = "Failed to connect. Check the room code.";
+        });
+    });
 }
 
 function startGame() {
     gameState = "PLAYING";
     menuScreen.classList.add("hidden");
-    syncGame();
-}
-
-async function syncGame() {
-    if (gameState !== "PLAYING") return;
+    resetBall();
     
-    const now = Date.now();
-    if (now - lastSync < SYNC_INTERVAL) return;
-    lastSync = now;
-    
-    try {
-        // Get current game state
-        const gameData = await window.storage.get(`game:${roomKey}`, true);
-        if (!gameData) return;
-        
-        const state = JSON.parse(gameData.value);
-        
-        // Update my paddle position
-        if (playerSide === "left") {
-            state.leftPaddle.y = leftPaddle.y;
-        } else {
-            state.rightPaddle.y = rightPaddle.y;
+    // Set up continuous paddle sync
+    setInterval(() => {
+        if (connection && connection.open && gameState === "PLAYING") {
+            const myPaddle = playerSide === "left" ? leftPaddle : rightPaddle;
+            connection.send({
+                type: 'paddle',
+                y: myPaddle.y
+            });
         }
-        
-        // Only the left player (host) updates ball physics
-        if (playerSide === "left") {
-            state.ball = {
-                x: ball.x,
-                y: ball.y,
-                dx: ball.dx,
-                dy: ball.dy,
-                speed: ball.speed
-            };
-            state.leftPaddle.score = leftPaddle.score;
-            state.rightPaddle.score = rightPaddle.score;
-        } else {
-            // Right player reads ball state from host
-            ball.x = state.ball.x;
-            ball.y = state.ball.y;
-            ball.dx = state.ball.dx;
-            ball.dy = state.ball.dy;
-            ball.speed = state.ball.speed;
-            leftPaddle.score = state.leftPaddle.score;
-            rightPaddle.score = state.rightPaddle.score;
-        }
-        
-        // Both players read opponent paddle position
-        if (playerSide === "left") {
-            rightPaddle.y = state.rightPaddle.y;
-        } else {
-            leftPaddle.y = state.leftPaddle.y;
-        }
-        
-        state.lastUpdate = now;
-        await window.storage.set(`game:${roomKey}`, JSON.stringify(state), true);
-        
-    } catch (error) {
-        console.error("Sync error:", error);
-    }
+    }, 16); // ~60fps
 }
 
 /**
@@ -524,9 +517,6 @@ function resetBall() {
 
 function update() {
     if (gameState !== "PLAYING") return;
-    
-    // Sync with server
-    syncGame();
 
     // Control your paddle
     const myPaddle = playerSide === "left" ? leftPaddle : rightPaddle;
@@ -534,13 +524,11 @@ function update() {
     if (keys["w"] && myPaddle.y > 0) myPaddle.y -= 8;
     if (keys["s"] && myPaddle.y < canvas.height - PADDLE_H) myPaddle.y += 8;
     
-    // Only the host (left player) runs ball physics
-    if (playerSide === "left") {
-        // Ball Physics
+    // Only the host runs ball physics
+    if (isHost) {
         ball.x += ball.dx;
         ball.y += ball.dy;
 
-        // Trail logic
         trail.push({x: ball.x, y: ball.y});
         if(trail.length > 20) trail.shift();
 
@@ -600,23 +588,51 @@ function update() {
         // Scoring
         if (ball.x < 0) {
             rightPaddle.score++;
-            checkWin();
             playSound("score");
             resetBall();
+            
+            if (connection && connection.open) {
+                connection.send({
+                    type: 'score',
+                    leftScore: leftPaddle.score,
+                    rightScore: rightPaddle.score
+                });
+            }
+            checkWin();
         }
         if (ball.x > canvas.width) {
             leftPaddle.score++;
-            checkWin();
             playSound("score");
             resetBall();
+            
+            if (connection && connection.open) {
+                connection.send({
+                    type: 'score',
+                    leftScore: leftPaddle.score,
+                    rightScore: rightPaddle.score
+                });
+            }
+            checkWin();
+        }
+        
+        // Send ball state to opponent
+        if (connection && connection.open) {
+            connection.send({
+                type: 'ball',
+                x: ball.x,
+                y: ball.y,
+                dx: ball.dx,
+                dy: ball.dy,
+                speed: ball.speed
+            });
         }
     } else {
-        // Right player: update trail based on received ball position
+        // Client updates trail
         trail.push({x: ball.x, y: ball.y});
         if(trail.length > 20) trail.shift();
     }
 
-    // Particles & Shake Update (both players)
+    // Particles & Shake
     particles.forEach((p, index) => {
         p.update();
         if (p.life <= 0) particles.splice(index, 1);
@@ -633,11 +649,11 @@ function checkWin() {
         const youWon = (playerSide === "left" && leftPaddle.score >= WIN_SCORE) || 
                        (playerSide === "right" && rightPaddle.score >= WIN_SCORE);
         
-        const winnerText = youWon ? "YOU WIN" : "YOU LOSE";
+        const winnerText = youWon ? "YOU WIN!" : "YOU LOSE";
         
         gameoverScreen.innerHTML = `
             <h1 style="color:${youWon ? '#0f0' : '#f00'}; text-shadow: 4px 4px ${youWon ? '#0a0' : '#a00'}">${winnerText}</h1>
-            <p style="font-size: 16px; margin: 20px 0;">Score: ${leftPaddle.score} - ${rightPaddle.score}</p>
+            <p style="font-size: 16px; margin: 20px 0;">Final Score: ${leftPaddle.score} - ${rightPaddle.score}</p>
             <button id="menu-btn">BACK TO MENU</button>
         `;
         
@@ -691,7 +707,7 @@ function draw() {
 
     particles.forEach(p => p.draw());
 
-    // Set colors based on player side
+    // Set colors
     if (playerSide === "left") {
         leftPaddle.color = COLOR_PLAYER;
         rightPaddle.color = COLOR_OPPONENT;
@@ -737,9 +753,17 @@ function loop() {
 }
 
 // Event Listeners
+createBtn.addEventListener("click", createRoom);
+
+showJoinBtn.addEventListener("click", () => {
+    joinSection.classList.remove("hidden");
+    createBtn.disabled = true;
+    showJoinBtn.disabled = true;
+});
+
 joinBtn.addEventListener("click", joinRoom);
 
-document.getElementById("room-key").addEventListener("keypress", (e) => {
+roomCodeInput.addEventListener("keypress", (e) => {
     if (e.key === "Enter") joinRoom();
 });
 
