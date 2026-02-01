@@ -14,10 +14,9 @@
         align-items: center;
         height: 100vh;
         overflow: hidden;
-        font-family: 'Press Start 2P', cursive; /* Retro Gaming Font */
+        font-family: 'Press Start 2P', cursive;
     }
 
-    /* The Game Container */
     #game-container {
         position: relative;
         box-shadow: 0 0 50px rgba(0, 255, 255, 0.2);
@@ -30,7 +29,6 @@
         background: radial-gradient(circle at center, #1a1a1a, #000000);
     }
 
-    /* CRT Scanline Effect Overlay */
     .scanlines {
         position: absolute;
         top: 0;
@@ -50,7 +48,6 @@
         box-shadow: inset 0 0 100px rgba(0,0,0,0.9);
     }
 
-    /* UI Overlay for Start/Game Over */
     #ui-layer {
         position: absolute;
         top: 0;
@@ -69,11 +66,84 @@
 
     .hidden { display: none !important; }
     
-    h1 { font-size: 40px; margin-bottom: 20px; color: #0ff; }
-    p { font-size: 14px; color: #aaa; line-height: 1.5; }
-    .blink { animation: blinker 1s linear infinite; color: #ff0; margin-top: 30px;}
+    h1 { 
+        font-size: 40px; 
+        margin-bottom: 30px; 
+        color: #0ff; 
+    }
+    
+    p { 
+        font-size: 14px; 
+        color: #aaa; 
+        line-height: 1.5; 
+    }
+    
+    .menu-section {
+        margin: 15px 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    label {
+        font-size: 12px;
+        color: #0ff;
+        margin-bottom: 8px;
+        text-shadow: 2px 2px #ff00de;
+    }
+    
+    select {
+        font-family: 'Press Start 2P', cursive;
+        font-size: 12px;
+        padding: 10px 20px;
+        background-color: #1a1a1a;
+        color: #0ff;
+        border: 2px solid #0ff;
+        border-radius: 4px;
+        cursor: pointer;
+        text-shadow: 0 0 5px #0ff;
+        box-shadow: 0 0 10px rgba(0, 255, 255, 0.3);
+    }
+    
+    select:hover {
+        background-color: #2a2a2a;
+        box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+    }
+    
+    select option {
+        background-color: #1a1a1a;
+        color: #0ff;
+    }
+    
+    button {
+        font-family: 'Press Start 2P', cursive;
+        font-size: 14px;
+        padding: 15px 30px;
+        margin-top: 30px;
+        background-color: #1a1a1a;
+        color: #ff0;
+        border: 3px solid #ff0;
+        border-radius: 4px;
+        cursor: pointer;
+        text-shadow: 0 0 10px #ff0;
+        box-shadow: 0 0 20px rgba(255, 255, 0, 0.4);
+        transition: all 0.3s;
+    }
+    
+    button:hover {
+        background-color: #ff0;
+        color: #000;
+        transform: scale(1.05);
+        box-shadow: 0 0 30px rgba(255, 255, 0, 0.8);
+    }
+    
+    .blink { 
+        animation: blinker 1s linear infinite; 
+    }
 
-    @keyframes blinker { 50% { opacity: 0; } }
+    @keyframes blinker { 
+        50% { opacity: 0; } 
+    }
 </style>
 </head>
 <body>
@@ -84,9 +154,49 @@
     
     <div id="ui-layer">
         <h1>NEON PONG</h1>
-        <p>W / S to Move</p>
-        <p>First to 10 Wins</p>
-        <div class="blink">CLICK TO START</div>
+        <div id="menu-screen">
+            <p style="margin-bottom: 20px;">W / S to Move • First to 10 Wins</p>
+            
+            <div class="menu-section">
+                <label>DIFFICULTY:</label>
+                <select id="difficulty">
+                    <option value="easy">EASY</option>
+                    <option value="medium" selected>MEDIUM</option>
+                    <option value="hard">HARD</option>
+                    <option value="impossible">IMPOSSIBLE</option>
+                </select>
+            </div>
+            
+            <div class="menu-section">
+                <label>YOUR PADDLE:</label>
+                <select id="paddle-color">
+                    <option value="#0ff" selected>CYAN</option>
+                    <option value="#0f0">GREEN</option>
+                    <option value="#ff0">YELLOW</option>
+                    <option value="#f0f">MAGENTA</option>
+                    <option value="#00f">BLUE</option>
+                    <option value="#f80">ORANGE</option>
+                    <option value="#fff">WHITE</option>
+                </select>
+            </div>
+            
+            <div class="menu-section">
+                <label>BALL COLOR:</label>
+                <select id="ball-color">
+                    <option value="#fff" selected>WHITE</option>
+                    <option value="#0ff">CYAN</option>
+                    <option value="#0f0">GREEN</option>
+                    <option value="#ff0">YELLOW</option>
+                    <option value="#f0f">MAGENTA</option>
+                    <option value="#f00">RED</option>
+                    <option value="#f80">ORANGE</option>
+                </select>
+            </div>
+            
+            <button id="start-btn" class="blink">START GAME</button>
+        </div>
+        
+        <div id="gameover-screen" class="hidden"></div>
     </div>
 </div>
 
@@ -97,15 +207,22 @@
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
 const uiLayer = document.getElementById("ui-layer");
+const menuScreen = document.getElementById("menu-screen");
+const gameoverScreen = document.getElementById("gameover-screen");
+const startBtn = document.getElementById("start-btn");
 
 const PADDLE_H = 80;
 const PADDLE_W = 15;
 const WIN_SCORE = 10;
 
-// Colors
-const COLOR_PLAYER = "#0ff"; // Cyan
-const COLOR_AI = "#ff00de";  // Hot Pink
-const COLOR_BALL = "#fff";
+// Colors (will be set from menu)
+let COLOR_PLAYER = "#0ff";
+let COLOR_AI = "#ff00de";
+let COLOR_BALL = "#fff";
+
+// Difficulty settings
+let aiSpeed = 0.12;  // Default medium
+let aiError = 20;    // Default medium
 
 // Game State
 let gameState = "MENU"; // MENU, PLAYING, GAMEOVER
@@ -114,7 +231,6 @@ let shakeIntensity = 0;
 
 /**
  * 2. AUDIO ENGINE (Web Audio API)
- * No external files needed. We synthesize sounds.
  */
 const AudioContext = window.AudioContext || window.webkitAudioContext;
 let audioCtx;
@@ -134,7 +250,6 @@ function playSound(type) {
     const now = audioCtx.currentTime;
 
     if (type === "hit") {
-        // Paddle Hit: High blip
         osc.type = "square";
         osc.frequency.setValueAtTime(400, now);
         osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
@@ -143,7 +258,6 @@ function playSound(type) {
         osc.start(now);
         osc.stop(now + 0.1);
     } else if (type === "wall") {
-        // Wall Hit: Low thud
         osc.type = "sine";
         osc.frequency.setValueAtTime(150, now);
         osc.frequency.linearRampToValueAtTime(100, now + 0.1);
@@ -152,7 +266,6 @@ function playSound(type) {
         osc.start(now);
         osc.stop(now + 0.1);
     } else if (type === "score") {
-        // Score: Retro powerup sound
         osc.type = "triangle";
         osc.frequency.setValueAtTime(200, now);
         osc.frequency.linearRampToValueAtTime(600, now + 0.2);
@@ -177,7 +290,7 @@ class Particle {
         this.speedX = Math.random() * 6 - 3;
         this.speedY = Math.random() * 6 - 3;
         this.color = color;
-        this.life = 1.0; // Opacity
+        this.life = 1.0;
     }
     update() {
         this.x += this.speedX;
@@ -204,26 +317,56 @@ const keys = {};
 document.addEventListener("keydown", e => keys[e.key] = true);
 document.addEventListener("keyup", e => keys[e.key] = false);
 
-// Start game on click (required for Audio Context)
-document.addEventListener("click", () => {
-    if (gameState === "MENU" || gameState === "GAMEOVER") {
-        initAudio();
-        resetGame();
-        gameState = "PLAYING";
-        uiLayer.classList.add("hidden");
+/**
+ * 4. MENU LOGIC
+ */
+startBtn.addEventListener("click", () => {
+    initAudio();
+    
+    // Get difficulty settings
+    const difficulty = document.getElementById("difficulty").value;
+    switch(difficulty) {
+        case "easy":
+            aiSpeed = 0.08;
+            aiError = 35;
+            break;
+        case "medium":
+            aiSpeed = 0.12;
+            aiError = 20;
+            break;
+        case "hard":
+            aiSpeed = 0.20;
+            aiError = 10;
+            break;
+        case "impossible":
+            aiSpeed = 0.30;
+            aiError = 3;
+            break;
     }
+    
+    // Get color settings
+    COLOR_PLAYER = document.getElementById("paddle-color").value;
+    COLOR_BALL = document.getElementById("ball-color").value;
+    
+    // Update player color
+    player.color = COLOR_PLAYER;
+    
+    // Start game
+    resetGame();
+    gameState = "PLAYING";
+    menuScreen.classList.add("hidden");
 });
 
 // Touch controls
 canvas.addEventListener("touchmove", e => {
-    e.preventDefault(); // Stop scrolling
+    e.preventDefault();
     let rect = canvas.getBoundingClientRect();
     let y = e.touches[0].clientY - rect.top;
     player.y = y - PADDLE_H / 2;
 }, { passive: false });
 
 /**
- * 4. LOGIC
+ * 5. GAME LOGIC
  */
 
 function spawnParticles(x, y, color) {
@@ -235,8 +378,7 @@ function spawnParticles(x, y, color) {
 function resetBall() {
     ball.x = canvas.width / 2;
     ball.y = canvas.height / 2;
-    ball.speed = 7; // Reset speed
-    // Random launch direction
+    ball.speed = 7;
     ball.dx = (Math.random() > 0.5 ? 1 : -1) * ball.speed;
     ball.dy = (Math.random() * 6) - 3;
     trail = [];
@@ -251,24 +393,20 @@ function resetGame() {
 function update() {
     if (gameState !== "PLAYING") return;
 
-    // --- Player Movement ---
+    // Player Movement
     if (keys["w"] && player.y > 0) player.y -= 8;
     if (keys["s"] && player.y < canvas.height - PADDLE_H) player.y += 8;
 
-    // --- AI Movement (HARDER DIFFICULTY) ---
-    // AI aims for the ball with better prediction
+    // AI Movement (uses difficulty settings)
     let targetY = ball.y - PADDLE_H / 2;
-    // Reduced error for harder difficulty (was 30, now 10)
-    let error = (Math.random() - 0.5) * 10; 
-    
-    // Lerp: Move 20% of the way to the target per frame (was 9%, now 20% - much faster!)
-    ai.y += (targetY + error - ai.y) * 0.20;
+    let error = (Math.random() - 0.5) * aiError;
+    ai.y += (targetY + error - ai.y) * aiSpeed;
     
     // Clamp AI
     if(ai.y < 0) ai.y = 0;
     if(ai.y > canvas.height - PADDLE_H) ai.y = canvas.height - PADDLE_H;
 
-    // --- Ball Physics ---
+    // Ball Physics
     ball.x += ball.dx;
     ball.y += ball.dy;
 
@@ -283,7 +421,7 @@ function update() {
         shakeIntensity = 5;
     }
 
-    // --- Paddle Collisions ---
+    // Paddle Collisions
     function checkCollision(paddle) {
         return ball.x - ball.r < paddle.x + PADDLE_W &&
                ball.x + ball.r > paddle.x &&
@@ -296,7 +434,6 @@ function update() {
         let collidePoint = (ball.y - (player.y + PADDLE_H / 2));
         collidePoint = collidePoint / (PADDLE_H / 2);
         
-        // Speed up ball slightly every hit (Arcade intensity!)
         ball.speed = Math.min(ball.speed * 1.05, 18); 
         
         let angleRad = (Math.PI / 4) * collidePoint;
@@ -305,7 +442,6 @@ function update() {
         ball.dx = direction * ball.speed * Math.cos(angleRad);
         ball.dy = ball.speed * Math.sin(angleRad);
         
-        // Push ball out of paddle to prevent sticking
         ball.x = player.x + PADDLE_W + ball.r + 1;
 
         playSound("hit");
@@ -326,7 +462,6 @@ function update() {
         ball.dx = direction * ball.speed * Math.cos(angleRad);
         ball.dy = ball.speed * Math.sin(angleRad);
 
-        // Push ball out
         ball.x = ai.x - ball.r - 1;
 
         playSound("hit");
@@ -334,7 +469,7 @@ function update() {
         shakeIntensity = 10;
     }
 
-    // --- Scoring ---
+    // Scoring
     if (ball.x < 0) {
         ai.score++;
         checkWin();
@@ -348,7 +483,7 @@ function update() {
         resetBall();
     }
 
-    // --- Particles & Shake Update ---
+    // Particles & Shake Update
     particles.forEach((p, index) => {
         p.update();
         if (p.life <= 0) particles.splice(index, 1);
@@ -362,17 +497,26 @@ function checkWin() {
     if (player.score >= WIN_SCORE || ai.score >= WIN_SCORE) {
         gameState = "GAMEOVER";
         winnerText = player.score >= WIN_SCORE ? "YOU WIN" : "GAME OVER";
-        uiLayer.innerHTML = `
-            <h1 style="color:${player.score >= WIN_SCORE ? '#0f0' : '#f00'}">${winnerText}</h1>
-            <p>Score: ${player.score} - ${ai.score}</p>
-            <div class="blink">CLICK TO PLAY AGAIN</div>
+        
+        gameoverScreen.innerHTML = `
+            <h1 style="color:${player.score >= WIN_SCORE ? '#0f0' : '#f00'}; text-shadow: 4px 4px ${player.score >= WIN_SCORE ? '#0a0' : '#a00'}">${winnerText}</h1>
+            <p style="font-size: 16px; margin: 20px 0;">Score: ${player.score} - ${ai.score}</p>
+            <button id="play-again-btn" class="blink">PLAY AGAIN</button>
         `;
-        uiLayer.classList.remove("hidden");
+        
+        gameoverScreen.classList.remove("hidden");
+        
+        // Add event listener to play again button
+        document.getElementById("play-again-btn").addEventListener("click", () => {
+            gameoverScreen.classList.add("hidden");
+            menuScreen.classList.remove("hidden");
+            gameState = "MENU";
+        });
     }
 }
 
 /**
- * 5. RENDERING
+ * 6. RENDERING
  */
 
 function drawNet() {
@@ -387,8 +531,6 @@ function drawNet() {
 }
 
 function draw() {
-    // Fill background with opacity for trail effect if desired, 
-    // but here we clear cleanly for crisp fps.
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Apply Screen Shake
@@ -407,7 +549,12 @@ function draw() {
         let ratio = (i + 1) / trail.length;
         ctx.beginPath();
         ctx.arc(pos.x, pos.y, ball.r * ratio, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 255, 255, ${ratio * 0.5})`;
+        ctx.fillStyle = COLOR_BALL.replace('#', 'rgba(') + ratio * 0.5 + ')';
+        // Convert hex to rgba for trail opacity
+        let r = parseInt(COLOR_BALL.slice(1,3), 16);
+        let g = parseInt(COLOR_BALL.slice(3,5), 16);
+        let b = parseInt(COLOR_BALL.slice(5,7), 16);
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${ratio * 0.5})`;
         ctx.fill();
     }
 
@@ -427,8 +574,8 @@ function draw() {
 
     // Draw Ball
     ctx.shadowBlur = 15;
-    ctx.shadowColor = "#fff";
-    ctx.fillStyle = "#fff";
+    ctx.shadowColor = COLOR_BALL;
+    ctx.fillStyle = COLOR_BALL;
     ctx.beginPath();
     ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
     ctx.fill();
@@ -437,7 +584,7 @@ function draw() {
     ctx.shadowBlur = 0;
     ctx.restore();
 
-    // Draw Score (Background HUD style)
+    // Draw Score
     ctx.font = "60px 'Press Start 2P'";
     ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
     ctx.textAlign = "center";
